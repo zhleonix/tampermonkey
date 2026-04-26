@@ -272,9 +272,10 @@
 5. 注意上下文的相关性。
 
 待排序文本：
----
+
 ${originalText}
----
+
+
         `;
 
         // If provider is local Chrome Prompt API, use injected bridge
