@@ -16,6 +16,66 @@
 (async function() {
     'use strict';
 
+    // ================= Popup 弹窗函数 =================
+    function showPopup(message) {
+        // 创建overlay容器
+        const overlay = document.createElement('div');
+        overlay.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10001;
+            cursor: pointer;
+        `;
+
+        // 创建popup内容
+        const popup = document.createElement('div');
+        popup.style.cssText = `
+            background: white;
+            padding: 24px;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            max-width: 400px;
+            word-wrap: break-word;
+            font-size: 14px;
+            line-height: 1.6;
+            color: #333;
+            animation: popupFadeIn 0.3s ease-in;
+        `;
+        popup.textContent = message;
+
+        // 添加淡入动画
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes popupFadeIn {
+                from { opacity: 0; transform: scale(0.9); }
+                to { opacity: 1; transform: scale(1); }
+            }
+        `;
+        document.head.appendChild(style);
+
+        overlay.appendChild(popup);
+        document.body.appendChild(overlay);
+
+        // 点击overlay或popup自动消失
+        function removePopup() {
+            overlay.remove();
+        }
+        overlay.addEventListener('click', removePopup);
+        popup.addEventListener('click', (e) => {
+            e.stopPropagation();
+        });
+
+        // 3秒后自动消失
+        setTimeout(removePopup, 3000);
+    }
+
     // ================= 配置区域 =================
     const CONFIG = {
         btnText: '🧩 AI整理',
@@ -29,9 +89,17 @@
             apiUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
             model: 'gemini-3.1-flash-lite-preview'
         },
+        GLM: {
+            apiUrl: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
+            model: 'glm-4.7-flash'
+        },
         openai_local: {
             apiUrl: 'http://localhost:59603/v1/chat/completions',
             model: 'gpt-4o'
+        },
+        ollama: {
+            apiUrl: 'http://127.0.0.1:11434/v1/chat/completions',
+            model: 'qwen2.5vl:3b'
         }
         ,chrome: {
             type: 'prompt_api', // local Chrome Prompt API (no remote HTTP)
@@ -48,8 +116,9 @@
     async function setApiKey() {
         const key = prompt('请输入 API Key');
         if (key) {
-            await GM_setValue(API_KEY_STORAGE, key.trim());
-            alert('API Key 已保存。');
+            const current = await GM_getValue(PROVIDER_STORAGE, CONFIG.provider);
+            await GM_setValue(API_KEY_STORAGE+current, key.trim());
+            showPopup('API Key 已保存。');
             return key.trim();
         }
         return '';
@@ -61,10 +130,10 @@
         const provider = prompt(`请输入模型提供商名称：${options}`, current);
         if (provider && PROVIDERS[provider.trim()]) {
             await GM_setValue(PROVIDER_STORAGE, provider.trim());
-            alert(`已切换到模型提供商：${provider.trim()}`);
+            showPopup(`已切换到模型提供商：${provider.trim()}`);
             return provider.trim();
         }
-        alert('无效的模型提供商，请输入正确名称。');
+        showPopup('无效的模型提供商，请输入正确名称。');
         return current;
     }
 
@@ -89,7 +158,7 @@
     providerSelect.value = currentProvider;
     providerSelect.addEventListener('change', async () => {
         await GM_setValue(PROVIDER_STORAGE, providerSelect.value);
-        alert(`已选择模型提供商：${providerSelect.value}`);
+        showPopup(`已选择模型提供商：${providerSelect.value}`);
     });
 
     const providerLabel = document.createElement('span');
@@ -245,13 +314,13 @@
     btn.onclick = async () => {
         const container = document.querySelector(CONFIG.targetSelector);
         if (!container) {
-            alert('未找到指定的元素，请检查 targetSelector 配置');
+            showPopup('未找到指定的元素，请检查 targetSelector 配置');
             return;
         }
 
         const originalText = container.innerText.trim();
         if (!originalText) {
-            alert('元素内容为空');
+            showPopup('元素内容为空');
             return;
         }
 
@@ -262,16 +331,23 @@
         const providerConfig = PROVIDERS[providerName] || PROVIDERS[DEFAULT_PROVIDER];
 
         const prompt = `
-你是一个专业的编辑。
-任务：审阅文本中的错别字，错误拼音，排列错乱的段落，按剧情发展的逻辑进行适当整理修正。
-要求：
-1. 绝对严禁改写、增删任何原文文字（汉语拼音除外，需替换为正常文字），必须保持原汁原味。
-2. 保持原有的段落换行格式。
-3. 只输出排序后的最终文本，不要包含任何解释或开场白。
-4. 文本前10行顺序是正常的，不要修改顺序。
-5. 注意上下文的相关性。
+# Role
+你是一个极其严谨、注重细节的专业小说文本编辑。
 
-待排序文本：
+# Task
+我将为你提供一段受到损坏的小说章节。这段文本存在【无关干扰字符】、【错别字/拼音】以及【中后半部分段落错乱】的问题。请你按照剧情发展的逻辑，对其进行净化、修正和重新排序。
+
+# Constraints (严格约束)
+1. **关于增删改写限制**：
+   - 【允许且必须】剔除故意插入的无关干扰字符（如小广告、乱码、无意义符号）。
+   - 【允许且必须】将错误拼音替换为正确的汉字，修正明显的错别字。
+   - 【绝对严禁】对小说原本的情节、语句进行任何修饰、润色、扩展或凭空捏造。除了剔除杂质和错字修正外，必须保持原汁原味。每个段落开头如有各种空格字符，需要保留，严禁删除。
+2. **关于前10行**：文本的前10行（以换行符为准）顺序是完全正常的，作为剧情基调参考，【绝对严禁】修改前10行的先后顺序。
+3. **关于格式**：保持段落之间的正常换行。
+4. **关于输出**：只输出排序、修正后的最终干净文本。**绝对严禁**包含任何解释、开场白、过渡句或“好的，为您整理如下”等废话。
+
+# Input Data
+待排序文本如下：
 
 ${originalText}
 
@@ -285,13 +361,13 @@ ${originalText}
                 const resultText = await sendPromptToPage(prompt, providerConfig.model);
                 if (resultText) {
                     container.innerText = resultText;
-                    alert('✅ 处理完成！（本地 Prompt API）');
+                    showPopup('✅ 处理完成！（本地 Prompt API）');
                 } else {
-                    alert('本地 Prompt API 返回空内容');
+                    showPopup('本地 Prompt API 返回空内容');
                 }
             } catch (e) {
                 console.error('Prompt API 调用失败', e);
-                alert('Prompt API 调用失败：' + (e && e.message ? e.message : e));
+                showPopup('Prompt API 调用失败：' + (e && e.message ? e.message : e));
             } finally {
                 btn.innerText = CONFIG.btnText;
                 btn.disabled = false;
@@ -300,11 +376,11 @@ ${originalText}
         }
 
         // Remote providers: ensure API key exists
-        let apiKey = await GM_getValue(API_KEY_STORAGE, '');
+        let apiKey = await GM_getValue(API_KEY_STORAGE+providerName, '');
         if (!apiKey) {
             apiKey = await setApiKey();
             if (!apiKey) {
-                alert('请先通过菜单设置 API Key。');
+                showPopup('请先通过菜单设置 API Key。');
                 btn.innerText = CONFIG.btnText;
                 btn.disabled = false;
                 return;
@@ -335,13 +411,24 @@ ${originalText}
 
                     if (sortedText) {
                         // 更新回页面
-                        container.innerText = sortedText;
-                        alert('✅ 处理完成！');
+                        container.innerText = '　　' + sortedText + '\n\n';
+                        showPopup('✅ 处理完成！');
                     }
                 } catch (e) {
                     console.error('解析失败', e);
                     console.error('返回内容', response);
-                    alert('API 返回解析失败，请查看控制台');
+                    // 尝试提取错误信息
+                    let errorMsg = 'API 返回解析失败';
+                    try {
+                        const errorRes = JSON.parse(response.responseText);
+                        const errContent = errorRes.error?.message || errorRes.message || JSON.stringify(errorRes);
+                        errorMsg = `状态码: ${response.status}\n错误: ${errContent}`;
+                    } catch (parseErr) {
+                        if (response.status) {
+                            errorMsg = `状态码: ${response.status}\n响应: ${response.responseText.substring(0, 200)}`;
+                        }
+                    }
+                    showPopup(errorMsg);
                 } finally {
                     btn.innerText = CONFIG.btnText;
                     btn.disabled = false;
@@ -349,13 +436,31 @@ ${originalText}
             },
             onerror: function(err) {
                 console.error('API 请求出错', err);
-                alert('API 请求失败，请检查网络或 API Key');
+                let errorMsg = 'API 请求失败，请检查网络或 API Key';
+                if (err.responseText) {
+                    try {
+                        const errorRes = JSON.parse(err.responseText);
+                        const errContent = errorRes.error?.message || errorRes.message || JSON.stringify(errorRes);
+                        errorMsg = `状态码: ${err.status || '未知'}\n错误: ${errContent}`;
+                    } catch (parseErr) {
+                        errorMsg = `状态码: ${err.status || '未知'}\n响应: ${err.responseText.substring(0, 200)}`;
+                    }
+                } else if (err.statusText) {
+                    errorMsg = `状态码: ${err.status || '未知'}\n错误: ${err.statusText}`;
+                }
+                showPopup(errorMsg);
                 btn.innerText = CONFIG.btnText;
                 btn.disabled = false;
             },
             ontimeout: function(err) {
                 console.error('API 请求Timeout', err);
-                alert('API 请求Timeout，请检查网络');
+                let errorMsg = 'API 请求Timeout，请检查网络';
+                if (err.responseText) {
+                    errorMsg += `（状态码: ${err.status || '未知'}）`;
+                } else if (err.statusText) {
+                    errorMsg += `（${err.statusText}）`;
+                }
+                showPopup(errorMsg);
                 btn.innerText = CONFIG.btnText;
                 btn.disabled = false;
 
