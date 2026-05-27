@@ -87,7 +87,7 @@
     const PROVIDERS = {
         google: {
             apiUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
-            model: 'gemini-3.1-flash-lite-preview'
+            model: 'gemini-3.1-flash-lite'
         },
         GLM: {
             apiUrl: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
